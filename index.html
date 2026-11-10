@@ -554,26 +554,55 @@ async function loadWeather() {
 loadWeather();
 setInterval(loadWeather, 15 * 60 * 1000);
 
-// Снимок NVR K9504-W обновляется каждые 2 секунды.
-// Локальный адрес доступен только в домашней сети.
-const nvrSnapshotUrl = "http://192.168.178.114/cgi-bin/snapshot.cgi?chn=0&f=1&u=admin&p=";
+// NVR K9504-W: сначала пробуем HTTPS, затем HTTP.
+// Если один способ не работает на устройстве, автоматически пробуем второй.
+const nvrSnapshotUrls = [
+  "https://192.168.178.114/cgi-bin/snapshot.cgi?chn=0&f=1&u=admin&p=",
+  "http://192.168.178.114/cgi-bin/snapshot.cgi?chn=0&f=1&u=admin&p="
+];
+
+let nvrUrlIndex = 0;
+let nvrRequestId = 0;
+let nvrFallbackUsed = false;
 
 function refreshNvrCamera() {
   const image = document.getElementById("nvrSnapshot");
-  if (image) image.src = nvrSnapshotUrl + "&rnd=" + Date.now();
+  if (!image) return;
+
+  nvrFallbackUsed = false;
+  nvrRequestId++;
+  image.dataset.requestId = String(nvrRequestId);
+  image.src = nvrSnapshotUrls[nvrUrlIndex] + "&rnd=" + Date.now();
 }
 
-function setNvrStatus(online) {
+function setNvrStatus(online, message) {
   const status = document.getElementById("nvrStatus");
   if (!status) return;
   status.style.color = online ? "var(--green)" : "#ffbd69";
   status.innerHTML = online
     ? '<span class="dot"></span> Регистратор подключён'
-    : '<span class="dot" style="background:#ffbd69"></span> Нет изображения — проверьте регистратор';
+    : '<span class="dot" style="background:#ffbd69"></span> ' + (message || 'Нет изображения — проверьте подключение');
 }
 
-document.getElementById("nvrSnapshot").addEventListener("load", () => setNvrStatus(true));
-document.getElementById("nvrSnapshot").addEventListener("error", () => setNvrStatus(false));
+const nvrImage = document.getElementById("nvrSnapshot");
+
+nvrImage.addEventListener("load", () => {
+  setNvrStatus(true);
+  nvrUrlIndex = nvrUrlIndex; // сохраняем успешный способ подключения
+});
+
+nvrImage.addEventListener("error", () => {
+  // При ошибке HTTPS один раз пробуем HTTP. При ошибке HTTP
+  // следующий плановый цикл снова начнётся с HTTPS.
+  if (!nvrFallbackUsed && nvrUrlIndex === 0) {
+    nvrFallbackUsed = true;
+    nvrImage.src = nvrSnapshotUrls[1] + "&rnd=" + Date.now();
+    return;
+  }
+
+  nvrUrlIndex = 0;
+  setNvrStatus(false, "Нет изображения — HTTPS и HTTP не ответили");
+});
 
 function openNvrCamera() {
   const image = document.getElementById("nvrSnapshot");
